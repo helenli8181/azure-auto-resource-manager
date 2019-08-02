@@ -1,7 +1,7 @@
-﻿public class ResourceGroupSettings
+﻿using System;
+using System.Collections.Generic;
+public class ResourceGroupSettings
 {
-    public string authority { get; set; }
-    public string clientId { get; set; }
-    public int expiryDuration { get; set; }
-    public int graceDuration { get; set; }
+    public Dictionary<string, string> user { get; set; }
+    public Dictionary<string, string> resourceGroup { get; set; }
 }

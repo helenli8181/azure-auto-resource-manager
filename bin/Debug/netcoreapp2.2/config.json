@@ -1,0 +1,16 @@
+{
+	"user": {
+		"authority": "https://login.microsoftonline.com/72f988bf-86f1-41af-91ab-2d7cd011db47",
+		"clientId": "ad4fb233-5f2a-4e8e-825e-ce78cd808d3e",
+		"clientSecret":  "AzureAutoResourceManager:clientSecret"
+	},
+
+  "resourceGroup": {
+    "expiryDuration": 60,
+    "graceDuration": 3
+  }
+
+  "AzureAutoResourceManager": {
+    "clientSecret":  "set in user secrets"
+  }
+}

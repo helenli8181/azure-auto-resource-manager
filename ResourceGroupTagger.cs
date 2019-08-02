@@ -21,6 +21,10 @@ using System.Runtime.InteropServices.ComTypes;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.Web.Administration;
+using System.IO;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
 
 public class ResourceGroupTagger
 {
@@ -32,25 +36,18 @@ public class ResourceGroupTagger
 
     public async Task Run()
     {
-        var client = CreateAuthenticatedHttpClient();
+        var settings = GetConfigJson();
+        var client = CreateAuthenticatedHttpClient(settings);
 
         await processResourceGroups(client, subscriptionId);
     }
 
-    static private HttpClient CreateAuthenticatedHttpClient()
+    static private HttpClient CreateAuthenticatedHttpClient(ResourceGroupSettings settings)
     {
-        /*
-        // Instantiate a new KeyVaultClient object, with an access token to Key Vault
-        var azureServiceTokenProvider1 = new AzureServiceTokenProvider();
-        var kv = new KeyVaultClient(new KeyVaultClient.AuthenticationCallback(azureServiceTokenProvider1.KeyVaultTokenCallback));
-        Console.WriteLine(kv.GetKeysAsync("HelenKeyVault"));
-        */
-
-        string authority = "https://login.microsoftonline.com/72f988bf-86f1-41af-91ab-2d7cd011db47";
+        string authority = settings.user["authority"];
         string resource = "https://management.core.windows.net/";
-        string clientId = "ad4fb233-5f2a-4e8e-825e-ce78cd808d3e";
-        //todo: method to get clientSecret from keyvault
-        string clientSecret = "w_rIEPNYg]]zal9N/yIDY3cM2X6VLeV2";
+        string clientId = settings.user["clientId"];
+        string clientSecret = settings.user["clientSecret"];
         string accessToken = GetAccessToken(authority, resource, clientId, clientSecret)
             .GetAwaiter().GetResult();
 
@@ -209,6 +206,15 @@ public class ResourceGroupTagger
         }
     }
 
+    public ResourceGroupSettings GetConfigJson()
+    {
+        using (StreamReader reader = new StreamReader("config.json"))
+        {
+            string json = reader.ReadToEnd();
+            ResourceGroupSettings settings = JsonConvert.DeserializeObject<ResourceGroupSettings>(json);
+            return settings;
+        }
+    }
 
     public static bool IsValidEmail(string email)
     {
@@ -255,4 +261,48 @@ public class ResourceGroupTagger
         }
     }
 
+    public static IConfigurationRoot Configuration { get; set; }
+
+    /*
+    static void ClientSecretMapper()
+    {
+        var devEnvironmentVariable = Environment.GetEnvironmentVariable("NETCORE_ENVIRONMENT");
+
+        var isDevelopment = string.IsNullOrEmpty(devEnvironmentVariable) ||
+                            devEnvironmentVariable.ToLower() == "development";
+        //Determines the working environment as IHostingEnvironment is unavailable in a console app
+
+        var builder = new ConfigurationBuilder();
+        // tell the builder to look for the appsettings.json file
+        builder
+            .AddJsonFile("config.json", optional: false, reloadOnChange: true);
+
+        //only add secrets in development
+        if (isDevelopment)
+        {
+            builder.AddUserSecrets<>();
+        }
+
+        Configuration = builder.Build();
+
+        IServiceCollection services = new ServiceCollection();
+
+        //Map the implementations of your classes here ready for DI
+        services
+            .Configure<ResourceGroupSettings>(Configuration.GetSection(nameof(ResourceGroupSettings)))
+            .AddOptions()
+            .AddLogging()
+            .AddSingleton<ISecretRevealer, SecretRevealer>()
+            .BuildServiceProvider();
+
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Get the service you need - DI will handle any dependencies - in this case IOptions<SecretStuff>
+        var revealer = serviceProvider.GetService<ISecretRevealer>();
+
+        revealer.Reveal();
+
+        Console.ReadKey();
+    }
+    */
 }
