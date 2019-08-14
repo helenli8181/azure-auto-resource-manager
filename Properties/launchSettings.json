@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "AzureAutoResourceManager": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "Key": "Value",
+        "SendGridKey": "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"
+      }
+    }
+  }
+}

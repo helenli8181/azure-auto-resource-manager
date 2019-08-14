@@ -5,7 +5,6 @@ C:\Users\t-hell\azure-auto-resource-manager\bin\Debug\netcoreapp2.2\AzureAutoRes
 C:\Users\t-hell\azure-auto-resource-manager\bin\Debug\netcoreapp2.2\AzureAutoResourceManager.pdb
 C:\Users\t-hell\azure-auto-resource-manager\obj\Debug\netcoreapp2.2\AzureAutoResourceManager.csprojAssemblyReference.cache
 C:\Users\t-hell\azure-auto-resource-manager\obj\Debug\netcoreapp2.2\AzureAutoResourceManager.csproj.CoreCompileInputs.cache
-C:\Users\t-hell\azure-auto-resource-manager\obj\Debug\netcoreapp2.2\UserSecretsAssemblyInfo.cs
 C:\Users\t-hell\azure-auto-resource-manager\obj\Debug\netcoreapp2.2\AzureAutoResourceManager.AssemblyInfoInputs.cache
 C:\Users\t-hell\azure-auto-resource-manager\obj\Debug\netcoreapp2.2\AzureAutoResourceManager.AssemblyInfo.cs
 C:\Users\t-hell\azure-auto-resource-manager\obj\Debug\netcoreapp2.2\AzureAutoResourceManager.dll

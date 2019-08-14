@@ -2,52 +2,48 @@
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Collections.Generic;
-using Microsoft.Azure.Management.ResourceManager.Fluent;
 using Microsoft.Azure.Management.Fluent;
 using Newtonsoft.Json;
 using AzResourceInsights;
-using Microsoft.Azure.Services.AppAuthentication;
-using System.Diagnostics;
 using System.Threading.Tasks;
 using Microsoft.IdentityModel.Clients.ActiveDirectory;
-using Newtonsoft.Json.Linq;
 using System.Text;
-using Microsoft.Azure.Management.Compute.Fluent.Models;
-using Microsoft.Azure.Management.AppService.Fluent.WebAppSourceControl.Definition;
 using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Net.Mail;
-using System.Runtime.InteropServices.ComTypes;
 using System.Globalization;
 using System.Text.RegularExpressions;
-using Microsoft.Web.Administration;
 using System.IO;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
+using SendGrid;
+using SendGrid.Helpers.Mail;
 
-
-public class ResourceGroupTagger
+public class ResourceGroupManager
 {
     private string subscriptionId;
-    public ResourceGroupTagger(IAzure azure)
+    private string clientSecret;
+    private string SendGridKey;
+    public ResourceGroupManager(IAzure azure, string clientSecret, string SendGridKey)
     {
         subscriptionId = azure.SubscriptionId;
+        this.clientSecret = clientSecret;
+        this.SendGridKey = SendGridKey;
     }
 
-    public async Task Run()
+    
+    public async Task Run(IAzure azure)
     {
         var settings = GetConfigJson();
-        var client = CreateAuthenticatedHttpClient(settings);
+        var client = CreateAuthenticatedHttpClient(settings, clientSecret);
 
-        await processResourceGroups(client, subscriptionId);
+        await processResourceGroups(azure, client, subscriptionId, settings, SendGridKey);
+
     }
 
-    static private HttpClient CreateAuthenticatedHttpClient(ResourceGroupSettings settings)
+    static private HttpClient CreateAuthenticatedHttpClient(ResourceGroupSettings settings, string clientSecret)
     {
+        Console.WriteLine("Authenticating...");
+
         string authority = settings.user["authority"];
         string resource = "https://management.core.windows.net/";
         string clientId = settings.user["clientId"];
-        string clientSecret = settings.user["clientSecret"];
         string accessToken = GetAccessToken(authority, resource, clientId, clientSecret)
             .GetAwaiter().GetResult();
 
@@ -58,9 +54,11 @@ public class ResourceGroupTagger
         return client;
     }
 
-    static async Task processResourceGroups(HttpClient client, string subscriptionId)
+    static async Task processResourceGroups(IAzure azure, HttpClient client, string subscriptionId, ResourceGroupSettings settings, string SendGridKey)
     {
         var resourceGroups = await GetResourceGroups(client, subscriptionId);
+
+        Console.WriteLine("Checking for tags...");
 
         foreach (var resourceGroup in resourceGroups)
         {
@@ -68,7 +66,7 @@ public class ResourceGroupTagger
             var activityLogs = await GetActivityLogs(client, subscriptionId, resourceGroupName);
             var creationLog = GetCreationLog(activityLogs);
 
-            if (creationLog != null && (!resourceGroup.tags.ContainsKey("creator") || !resourceGroup.tags.ContainsKey("createdDate") || !resourceGroup.tags.ContainsKey("expiryDate")))
+            if (creationLog != null &&  (resourceGroup.tags == null || !resourceGroup.tags.ContainsKey("createdBy") || !resourceGroup.tags.ContainsKey("createdDate") || !resourceGroup.tags.ContainsKey("expiryDate")))
             {
                 string creator;
 
@@ -84,22 +82,23 @@ public class ResourceGroupTagger
                 string createdDate = DateTime.Parse(creationLog.eventTimestamp).ToUniversalTime().ToString("yyyy-MM-dd");
                 string expiryDate;
 
-                if (DateTime.Now.CompareTo(DateTime.Parse(creationLog.eventTimestamp).AddDays(180)) < 0)
+                if (DateTime.Now.CompareTo(DateTime.Parse(creationLog.eventTimestamp).AddDays(Int32.Parse(settings.resourceGroup["expiryDuration"]))) < 0)
                 {
-                    expiryDate = DateTime.Parse(creationLog.eventTimestamp).AddDays(180).ToString("yyyy-MM-dd");
+                    expiryDate = DateTime.Parse(creationLog.eventTimestamp).AddDays(Int32.Parse(settings.resourceGroup["expiryDuration"])).ToString("yyyy-MM-dd");
                 }
                 else
                 {
-                    //change to use grace period of 3 days instead
-                    expiryDate = DateTime.Now.AddDays(180).ToString("yyyy-MM-dd");
+                    expiryDate = DateTime.Now.AddDays(Int32.Parse(settings.resourceGroup["graceDuration"])).ToString("yyyy-MM-dd");
                 }
 
                 var tags = CreateTags(creator, createdDate, expiryDate);
 
-                await PostTags(client, subscriptionId, resourceGroupName, tags);
+                await PatchTags(client, subscriptionId, resourceGroupName, tags);
             }
         }
-        GetExpiredResourceGroups(resourceGroups);
+        await ManageExpiredResourceGroups(azure, resourceGroups, client, settings, subscriptionId, SendGridKey);
+        
+        
     }
 
     static async Task<string> GetAccessToken(string authority, string resource, string clientId, string clientSecret)
@@ -170,7 +169,7 @@ public class ResourceGroupTagger
         return tags;
     }
 
-    static async Task PostTags(HttpClient client, string subscriptionId, string resourceGroupName, Dictionary<string, string> tags)
+    static async Task PatchTags(HttpClient client, string subscriptionId, string resourceGroupName, Dictionary<string, string> tags)
     {
         var requestBody = new Dictionary<string, object>()
             {
@@ -179,31 +178,11 @@ public class ResourceGroupTagger
 
         string requestJson = JsonConvert.SerializeObject(requestBody);
 
-        var response = await client.PatchAsync(
+        await client.PatchAsync(
         $"https://management.azure.com/subscriptions/{subscriptionId}/resourcegroups/{resourceGroupName}?api-version=2019-05-10",
         new StringContent(requestJson, Encoding.UTF8, "application/json"));
-    }
 
-    static void GetExpiredResourceGroups(ResourceGroups[] resourceGroups)
-    {
-        foreach (var resourceGroup in resourceGroups)
-        {
-            //1. read expirydate tag
-            //if resourceGroup has reached expiry date, and has no activity logs from the last 60 days:
-            //send email notifying creator to manually extend expiry date if RG still needed
-            //otherwise, call delete function three days after and send email notifying delete
-            string value = "";
-
-            if (resourceGroup.tags.TryGetValue("expiryDate", out value) && DateTime.Now.CompareTo(Convert.ToDateTime(value)) >= 0)
-            {
-                //send email notification
-                Console.WriteLine(resourceGroup.name + " has expired.");
-            }
-            else
-            {
-                Console.WriteLine(resourceGroup.name + " has not expired.");
-            }
-        }
+        Console.WriteLine("Successfully tagged" + resourceGroupName);
     }
 
     public ResourceGroupSettings GetConfigJson()
@@ -261,48 +240,125 @@ public class ResourceGroupTagger
         }
     }
 
-    public static IConfigurationRoot Configuration { get; set; }
-
-    /*
-    static void ClientSecretMapper()
+    public static async Task ManageExpiredResourceGroups(IAzure azure, ResourceGroups[] resourceGroups, HttpClient client, ResourceGroupSettings settings, string subscriptionId, string SendGridKey)
     {
-        var devEnvironmentVariable = Environment.GetEnvironmentVariable("NETCORE_ENVIRONMENT");
+        Console.WriteLine("Checking for expired resource groups...");
 
-        var isDevelopment = string.IsNullOrEmpty(devEnvironmentVariable) ||
-                            devEnvironmentVariable.ToLower() == "development";
-        //Determines the working environment as IHostingEnvironment is unavailable in a console app
-
-        var builder = new ConfigurationBuilder();
-        // tell the builder to look for the appsettings.json file
-        builder
-            .AddJsonFile("config.json", optional: false, reloadOnChange: true);
-
-        //only add secrets in development
-        if (isDevelopment)
+        foreach (var resourceGroup in resourceGroups)
         {
-            builder.AddUserSecrets<>();
+            //1. read expirydate tag
+            //if resourceGroup has reached expiry date, and has no activity logs from the last 60 days:
+            //send email notifying creator to manually extend expiry date if RG still needed
+            //otherwise, call delete function three days after and send email notifying delete
+
+            string value = "";
+            resourceGroup.tags.TryGetValue("expiryDate", out value);
+
+            if ( value == "do not delete")
+            {
+                Console.WriteLine(resourceGroup.name + " has been exempt.");
+
+            } else
+            {
+                var resourceGroupName = resourceGroup.name;
+                var activityLogs = await GetActivityLogs(client, subscriptionId, resourceGroupName);
+                var creationLog = GetCreationLog(activityLogs);
+                var creator = resourceGroup.tags["createdBy"];
+                var createdDate = resourceGroup.tags["createdDate"];
+                var expiryDate = resourceGroup.tags["expiryDate"];
+
+                resourceGroup.tags.TryGetValue("expiryDate", out value);
+
+                if (resourceGroup.tags.TryGetValue("expiryDate", out value) && DateTime.Now.CompareTo(Convert.ToDateTime(value)) >= 0)
+                {
+                    DeleteResourceGroup(azure, resourceGroupName);
+                }
+                else if (resourceGroup.tags.TryGetValue("expiryDate", out value) && DateTime.Now.AddDays(3).CompareTo(Convert.ToDateTime(value)) >= 0)
+                {
+                    //send email notification
+                    SendEmailNotification(creationLog, client, settings, subscriptionId, resourceGroupName, activityLogs, resourceGroup, creator, createdDate, expiryDate, SendGridKey);
+
+                    Console.WriteLine(resourceGroup.name + " will expire soon.");
+                }
+                else
+                {
+                    Console.WriteLine(resourceGroup.name + " has not expired.");
+                }
+            } 
         }
-
-        Configuration = builder.Build();
-
-        IServiceCollection services = new ServiceCollection();
-
-        //Map the implementations of your classes here ready for DI
-        services
-            .Configure<ResourceGroupSettings>(Configuration.GetSection(nameof(ResourceGroupSettings)))
-            .AddOptions()
-            .AddLogging()
-            .AddSingleton<ISecretRevealer, SecretRevealer>()
-            .BuildServiceProvider();
-
-        var serviceProvider = services.BuildServiceProvider();
-
-        // Get the service you need - DI will handle any dependencies - in this case IOptions<SecretStuff>
-        var revealer = serviceProvider.GetService<ISecretRevealer>();
-
-        revealer.Reveal();
-
-        Console.ReadKey();
     }
-    */
+
+    //NOT DONE YET
+    //todo: don't run this if rg has email sent tag
+    public static void SendEmailNotification(Value creationLog, HttpClient client, ResourceGroupSettings settings, string subscriptionId, string resourceGroupName, List<Value> activityLogs, ResourceGroups resourceGroup, string creator, string createdDate, string expiryDate, string SendGridKey)
+    {
+
+        var apiKey = SendGridKey;
+
+        var emailClient = new SendGridClient(apiKey);
+        var from = new EmailAddress(settings.user["fromEmail"], "Auto ARM");
+        var subject = resourceGroupName + " about to expire";
+        var to = new EmailAddress(GetEmailAddress(creationLog, activityLogs), "Example User");
+        var plainTextContent = "Hello, your resource group " + resourceGroupName + " will expire on " + expiryDate + ". Please change the expiryDate tag if you do not wish to delete it.";
+        var htmlContent = "";
+        var msg = MailHelper.CreateSingleEmail(from, to, subject, plainTextContent, htmlContent);
+        var response = emailClient.SendEmailAsync(msg).Result;
+        string resp1 = response.StatusCode.ToString();
+        string resp2 = response.Body.ReadAsStringAsync().Result.ToString();
+        string resp3 = response.Headers.ToString();
+
+        PatchEmailSentTag(client, subscriptionId, resourceGroupName, creator, createdDate, expiryDate).Wait();
+    }
+
+    public static string GetEmailAddress(Value creationLog, List<Value> activityLogs)
+    {
+        if (IsValidEmail(creationLog.caller))
+        {
+            return creationLog.caller;
+        }
+        else if (IsValidEmail(GetLastCaller(activityLogs)))
+        {
+            return GetLastCaller(activityLogs);
+        }
+        else
+        {
+            return null;
+        }
+    }
+
+    public static string GetLastCaller(List<Value> activityLogs)
+    {
+        var lastAttributedLog = activityLogs
+            .Where(al => IsValidEmail(al.caller))
+            .OrderBy(al => al.eventTimestamp)
+            .LastOrDefault();
+
+        return lastAttributedLog.caller;
+    }
+
+    public static async Task PatchEmailSentTag(HttpClient client, string subscriptionId, string resourceGroupName, string creator, string createdDate, string expiryDate)
+    {
+        var tag = new Dictionary<string, string>()
+        {
+            {"createdBy", creator },
+            {"createdDate", createdDate },
+            {"expiryDate", expiryDate },
+            { "expiryWhenEmailSent", expiryDate }
+        };
+        var requestBody = new Dictionary<string, object>()
+            {
+                {"tags", tag}
+            };
+
+        string requestJson = JsonConvert.SerializeObject(requestBody);
+
+        await client.PatchAsync(
+        $"https://management.azure.com/subscriptions/{subscriptionId}/resourcegroups/{resourceGroupName}?api-version=2019-05-10",
+        new StringContent(requestJson, Encoding.UTF8, "application/json"));
+    }
+
+    public static void DeleteResourceGroup(IAzure azure, string resourceGroupName)
+    {
+        azure.ResourceGroups.DeleteByName(resourceGroupName);
+    }
 }
