@@ -2,8 +2,6 @@
 using System.IO;
 using Microsoft.Azure.Management.Fluent;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Web.Administration;
 
 namespace AzureAutoResourceManager
 {

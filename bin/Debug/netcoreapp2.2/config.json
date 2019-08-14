@@ -1,6 +1,6 @@
 {
   "user": {
-    "authority": "https://login.microsoftonline.com/{tenantId}",
+    "authority": "authority here",
     "clientId": "client ID here",
     "clientSecret": "set in Secret Manager",
     "fromEmail": "your email address here"
