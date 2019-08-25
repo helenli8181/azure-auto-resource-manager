@@ -22,7 +22,7 @@ config.json requires the user to fill in the following fields:
 *	expiryDuration: number of days from creation date to set as expiration date on all resource groups
 *	graceDuration: number of days to keep resource groups that have exceeded expiration before 
 
-###Store Secrets using Secret Manager
+### Store Secrets using Secret Manager
 
 To create the userSecretsId, Open the AzureAutoResourceManager.csproj file in Notepad and edit this line:
 ```<UserSecretsId>User Secret GUID Here</UserSecretsId>```
@@ -37,7 +37,8 @@ Make secrets.json look like this:
     "clientSecret": "secret here",
     "SendGridKey": "SendGrid key here"
   }
-}```
+}
+```
 
 ### Changing an Expiration Date
 Three days before a resource group expires, the owner will receive an email. It will prompt you to change the expiration date if you want to keep the resource group. Manually edit the expiryDate tag following the YYYY-MM-DD format.
@@ -47,5 +48,5 @@ Set the value of the “expiryDate” tag to “do not delete”. AARM will skip
 
 
 
-##Areas for Improvement
+## Areas for Improvement
 1. As of now there is no support for how to deal with transferring ownership of an RG to a different person, which would be useful in an organization with frequently changing members.
